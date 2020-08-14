@@ -15,7 +15,7 @@ Once all the pages are explored, it's quite easy to create the CSV sitemap file.
 
 **Usage**
 
-Download this project from GitHub or run `git clone https://github.com/thebrehanubugg/roma roma`. Once downloaded, change into the `roma` directory and run `python3 roma.py {URL}` where `{URL}` is the base URL of the site you want to crawl.
+Download this project from GitHub or run `git clone https://github.com/thebrehanubugg/roma roma`. Once downloaded, change into the `roma` directory and run `python3 roma.py` and enter the base URL of the site you want to crawl when prompted. Each page will be printed, along with some other metadata, and finally a time lapse metric and CSV logging will follow before the program is terminated.
 
 Once completed a new `sitemap.csv` will be created that can easily be uploaded to Excel, Google Sheets, or can be manipulated more.
 
