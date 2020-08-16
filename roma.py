@@ -36,13 +36,14 @@ def main():
     start_time = time()
 
     # create the sitemap and convert the dictionaries to CSV
-    sitemap = create_sitemap(START_URL, EXPLORED, TO_VISIT)
+    result = create_sitemap(START_URL, EXPLORED, TO_VISIT)
+    sitemap, n_pages = result[0], result[1]
     to_csv = dict_to_csv(sitemap)
 
     elapsed_time = time() - start_time
-    stats = f"Explored { len(EXPLORED) } pages in { elapsed_time } seconds"
+    stats = f"Explored { n_pages - 1 } pages in { elapsed_time } seconds"
 
-    print(colored("=" * 50, "grey"))
+    print(colored("=" * 50, "white"))
     print(colored(stats, "blue"))
 
     # write the data to a sitemap CSV file (easily exportable to Excel)

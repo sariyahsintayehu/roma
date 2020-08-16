@@ -1,0 +1,4 @@
+PyInquirer
+termcolor
+bs4
+requests

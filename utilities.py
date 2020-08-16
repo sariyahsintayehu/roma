@@ -1,3 +1,4 @@
+from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from termcolor import colored
 from requests import get
@@ -31,50 +32,110 @@ ALL_CONTENT_TYPES = {
     "video/webm": "WebM (Video)"
 }
 
+# global start url variable
+START_URL = None
+START_UNPACKED = None
 
-def load_bs4_page(url: str) -> BeautifulSoup:
-    """Get page contents, load into BeautifulSoup, and return object."""
+
+def split_url(url: str) -> dict:
+    """Split a given URL into its scheme, base, and path."""
+    unpacked = urlsplit(url)
+
+    path, query, fragment = unpacked.path, unpacked.query, unpacked.fragment
+    divider = "#" if unpacked.fragment else ""
+
+    full_path = f"{ path }{ query }{ divider }{ fragment }"
+
+    return {
+        "scheme": unpacked.scheme,
+        "base": unpacked.netloc,
+        "path": full_path
+    }
+
+
+def get_page(url: str):
+    """Fetch a `GET` request to the URL and return the parser."""
     page = get(url)
     return BeautifulSoup(page.content, "html.parser")
 
 
-def get_anchor_tags(page: BeautifulSoup) -> list:
-    """Return a list of all anchor tag links."""
-    return [link["href"] for link in page.find_all("a")]
+def is_valid(url: str) -> bool:
+    """Check to see if a given URL belongs to the site we're scraping."""
+    if url.startswith("/"):
+        return True
+
+    global START_URL
+    global START_UNPACKED
+
+    unpacked = split_url(url)
+    return unpacked["base"] == START_UNPACKED["base"]
+
+
+def fix_url(url: str) -> str:
+    """Add the beginning path to a URL if only endpoint."""
+    global START_UNPACKED
+
+    if url.startswith("/"):
+        scheme, base = START_UNPACKED["scheme"], START_UNPACKED["base"]
+        return f"{ scheme }://{ base }{ url }"
+
+    return url
+
+
+def print_status(index: int, page_info: dict) -> None:
+    """For logging purposes, print the page index and info."""
+    message = f"({ index }): { page_info }"
+    print(colored(message, "green"))
+
+
+def get_links(page: BeautifulSoup):
+    """Get all valid links on a specified page."""
+    links = set()
+
+    for link in page.find_all("a"):
+        try:
+            links.add(link["href"])
+        except KeyError:
+            message = f"This link doesn't have an `href` attribute: { link }"
+            print(colored(message, "red"))
+
+    valid_links = [link for link in links if is_valid(link)]
+    return [fix_url(link) for link in valid_links]
 
 
 def get_content_type(url: str) -> str:
-    """Return the page content type."""
-    headers = get(url).headers
+    """Get the page's content type based on the headers."""
+    global ALL_CONTENT_TYPES
+    page_headers = get(url).headers
 
     for content_type in ALL_CONTENT_TYPES:
-        if content_type in headers["Content-Type"]:
+        if content_type in page_headers["Content-Type"]:
             return ALL_CONTENT_TYPES[content_type]
 
-    # the content type wasn't found, so it's unknown
     return "undefined"
 
 
-def crawl(url: str, explored: set, to_visit: set) -> str:
-    """Crawl a page, add said URL to `explored` and add all links on the page
-    to `to_visit` as unexplored pages."""
-    page = load_bs4_page(url)
-    anchors = get_anchor_tags(page)
+def crawl_page(url: str, explored: set, to_visit: set) -> dict:
+    """Crawl a specified URL and add it to the explored."""
+    page = get_page(url)
+    links = get_links(page)
+
+    other_url = f"{ url[:-1] }" if url.endswith("/") else f"{ url }/"
 
     # get the page title and content type
-    title = page.find("title").string
+    try:
+        title = page.find("title").string
+    except AttributeError:
+        title = url
     content_type = get_content_type(url)
 
-    # add the current URL to `explored` because we visited it
     explored.add(url)
+    explored.add(other_url)
 
-    # add links to `to_visit` if and *only* if the page hasn't been explored
-    # already (otherwise will be stuck in an infinite loop)
-    for anchor in anchors:
-        if anchor not in explored:
-            to_visit.add(anchor)
+    for link in links:
+        if link not in explored:
+            to_visit.add(link)
 
-    # data to be written to the CSV file
     return {
         "url": url,
         "title": title,
@@ -82,55 +143,51 @@ def crawl(url: str, explored: set, to_visit: set) -> str:
     }
 
 
-def create_sitemap(start_url: str, explored: set, to_visit: set) -> dict:
-    """Create the sitemap dictionary given a start URL."""
+def create_sitemap(start_url: str, explored: set, to_visit: set) -> tuple:
+    """Crawl the entire website given a `start_url`."""
+    global START_URL
+    global START_UNPACKED
+
+    start_url_info = split_url(start_url)
+    START_URL, START_UNPACKED = start_url, start_url_info
+
     sitemap = {}
     counter = 1
 
-    # start the process with the first page
-    index_crawl = crawl(start_url, explored, to_visit)
-    sitemap[start_url] = index_crawl
+    index = crawl_page(start_url, explored, to_visit)
+    sitemap[start_url] = index
 
-    index_page_stats = f"{ counter }: { index_crawl }"
-    print(colored(index_page_stats, "green"))
-
+    print_status(counter, index)
     counter += 1
 
-    # while pages are yet to be explored...
     while len(to_visit) != 0:
-        # get a random page and crawl it
-        first_page = to_visit.pop()
-        page_result = crawl(first_page, explored, to_visit)
+        next_page = to_visit.pop()
 
-        current_page_stats = f"{ counter }: { page_result }"
+        crawled_page = crawl_page(next_page, explored, to_visit)
+        print_status(counter, crawled_page)
 
-        print(colored(current_page_stats, "green"))
-
-        sitemap[first_page] = page_result
+        sitemap[next_page] = crawled_page
         counter += 1
 
-    return sitemap
+    return (sitemap, counter)
 
 
 def dict_to_csv(sitemap: dict) -> str:
-    """Return the `sitemap` in CSV form."""
+    """Convert the sitemap dictionary to CSV text."""
     headers = "URL,Page Title,Content Type"
-    by_line = set()
+    result = f"{ headers }"
 
-    # loop through each page and write the CSV row
-    for page, page_info in sitemap.items():
+    for url, page_info in sitemap.items():
         title, content_type = page_info["title"], page_info["content_type"]
-        row = f"{ page },{ title },{ content_type }"
+        line = f"{ url },{ title },{ content_type }"
+        result = f"{ result }\n{ line }"
 
-        by_line.add(row)
-
-    lines = "\n".join(by_line)
-    return f"{ headers }\n{ lines }"
+    return result
 
 
 def save_to_csv(data: str, title: str) -> None:
     """Write the given `data` to a sitemap file named `title`."""
-    system("rm sitemap.csv")
+    system("rm *.csv")
 
     with open(f"{ title }.csv", "w") as sitemap:
         sitemap.write(data)
